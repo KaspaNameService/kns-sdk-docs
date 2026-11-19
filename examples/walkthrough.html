@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@knsdomains/sdk-tx by example</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --line: color-mix(in srgb, currentColor 20%, transparent);
+        --soft: color-mix(in srgb, currentColor 6%, transparent);
+      }
+      body {
+        max-width: 62rem;
+        margin: 0 auto;
+        padding: 1.5rem 1rem 4rem;
+        font:
+          16px/1.55 system-ui,
+          sans-serif;
+      }
+      h1 {
+        margin-bottom: 0.25rem;
+      }
+      h2 {
+        margin: 0 0 0.35rem;
+        font-size: 1.1rem;
+      }
+      p {
+        margin: 0.5rem 0;
+      }
+      code,
+      pre {
+        font-family: ui-monospace, monospace;
+        font-size: 0.85rem;
+      }
+      nav {
+        margin: 1rem 0;
+        padding: 0.75rem 1rem;
+        border: 1px solid var(--line);
+        border-radius: 0.5rem;
+      }
+      nav ol {
+        margin: 0.25rem 0 0;
+        padding-left: 1.25rem;
+        columns: 2;
+      }
+      section {
+        margin: 1rem 0;
+        padding: 0.9rem 1rem;
+        border: 1px solid var(--line);
+        border-radius: 0.5rem;
+      }
+      figure {
+        position: relative;
+        margin: 0.6rem 0 0;
+      }
+      pre {
+        overflow-x: auto;
+        margin: 0;
+        padding: 0.7rem 0.8rem;
+        border-radius: 0.35rem;
+        background: var(--soft);
+      }
+      button {
+        position: absolute;
+        top: 0.4rem;
+        right: 0.4rem;
+        font: inherit;
+        font-size: 0.75rem;
+        padding: 0.15rem 0.5rem;
+        border: 1px solid var(--line);
+        border-radius: 0.35rem;
+        background: Canvas;
+        color: inherit;
+        cursor: pointer;
+        opacity: 0.5;
+      }
+      figure:hover button,
+      button:focus {
+        opacity: 1;
+      }
+      table {
+        margin-top: 0.6rem;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+      }
+      th,
+      td {
+        padding: 0.25rem 0.9rem 0.25rem 0;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+      }
+      footer {
+        margin-top: 2rem;
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>@knsdomains/sdk-tx by example</h1>
+    <p>
+      This page walks through every operation the package builds: a registration, a profile change, the primary name, a
+      listing and a purchase, a transfer, a subdomain, a multisig round trip, and following the chain. Each one shows
+      the code, what it answers with, and the point where the wallet asks the person to sign.
+    </p>
+    <p>
+      Nothing on this page runs. Every operation here spends coins and needs a signature, so a page that ran them would
+      need your wallet and your money. Read it beside the package's README and copy what you need.
+    </p>
+    <p>
+      The figures are the testnet-10 deployment's: a name of five code points or more costs 35 KAS, four cost 525, three
+      2,100, and one or two 4,200. Every registration locks three 0.6 KAS deposits in covenant outputs and sets aside
+      one 0.2 KAS fee allowance, so a 35 KAS name needs 37 KAS in the wallet. A spend of a name you hold (a transfer, a
+      profile change, the primary flag, a listing, a cancel) pays its network fee, about 0.013 to 0.016 KAS, from the
+      wallet; the name's deposit is never spent on it. A buy pays the price, and a subdomain mint locks 1.8 KAS of
+      deposits and pays the 1 KAS subdomain fee and about 0.03 KAS of network fee, from the wallet. A sompi is 1e-8 KAS.
+    </p>
+
+    <nav>
+      Operations
+      <ol>
+        <li><a href="#wiring">What you wire up</a></li>
+        <li><a href="#register">Register a name</a></li>
+        <li><a href="#plan">Plan, show, submit</a></li>
+        <li><a href="#profile">Change the profile</a></li>
+        <li><a href="#primary">The primary name</a></li>
+        <li><a href="#market">List, cancel, buy</a></li>
+        <li><a href="#transfer">Hand a name over</a></li>
+        <li><a href="#subdomain">Mint a subdomain</a></li>
+        <li><a href="#multisig">A multisig holder</a></li>
+        <li><a href="#follow">Follow the chain</a></li>
+        <li><a href="#refusals">When something refuses</a></li>
+      </ol>
+    </nav>
+
+    <section id="wiring">
+      <h2>What you wire up</h2>
+      <p>
+        The package holds no key. You give it the read client, the wasm module, a node URL and a wallet. The module
+        connects to the node itself for every operation that reaches the chain, and it verifies every signature the
+        wallet returns against its own hash before anything is sent.
+      </p>
+      <figure>
+        <pre>
+import { Kns, WrpcJson, fromWrpc } from '@knsdomains/sdk'
+import { load } from '@knsdomains/wasm'
+import { KnsTx, kaswareSigner, fromWrpc as followWrpc } from '@knsdomains/sdk-tx'
+
+const network = 'testnet-10'
+const nodeUrl = 'wss://node.example/kaspa/testnet-10/wrpc/borsh' // the module's connection, Borsh
+const kns = new Kns({ network }) // the public tracker of this build's lineage
+const wasm = await load() // 9 MB, once; loadNode() under Node
+
+// Optional: one JSON connection of your own, for proving reads and following the chain.
+const rpc = await WrpcJson.connect('wss://node.example/kaspa/testnet-10/wrpc/json')
+const node = fromWrpc(rpc, { network }) // new Kns({ network, node }) proves reads on it
+
+const tx = new KnsTx({
+  kns,
+  wasm,
+  nodeUrl,
+  signer: await kaswareSigner({ network }), // or kastleSigner({ network })
+  follower: await followWrpc(rpc), // where a transaction was accepted, through the subscription
+})
+
+await tx.status() // the module resolves this build's registry, or refuses
+await tx.probeSigner() // once per wallet build: will it sign a covenant input, does its sighash match</pre>
+      </figure>
+      <p>
+        <code>probeSigner</code> broadcasts nothing. It asks the wallet to sign a real gap input it does not own and a
+        coin of its own, and reports whether the wallet signed the foreign input and whether its hash is the module's.
+      </p>
+    </section>
+
+    <section id="register">
+      <h2>Register a name</h2>
+      <p>
+        A registration is one transaction: it splits the gap covering the name, mints the name's claim and its state,
+        locks three 0.6 KAS deposits, and pays the fee to the registry's fee address. The wallet is asked once. There is
+        no salt to keep and nothing to resume: until it is accepted nothing happened, and once it is the name is held.
+        The protocol accepts front-running, so whoever's registration is accepted first holds the name.
+      </p>
+      <figure>
+        <pre>
+const quote = tx.quote('alice.kas')
+// quote.feeSompi      3_500_000_000n   35 KAS, tier 5 (five code points or more)
+// quote.lockedSompi     180_000_000n   three 0.6 KAS deposits
+// quote.allowanceSompi   20_000_000n   one 0.2 KAS fee allowance; back as change only past 0.2 KAS over
+// quote.totalToFund   3_700_000_000n   37 KAS the wallet must hold
+
+await kns.available('alice.kas') // true, asked by a prefix of the hash: the tracker never learns the name
+
+const done = await tx.registerName('alice.kas', {
+  onProgress: (p) => show(p.phase), // checking → signing → broadcasting → done
+})
+// the user signs here, once
+
+// done.txid      '…'
+// done.feeSompi  3_500_000_000n
+// done.warnings  []   the module's handover text; for a multisig or a contract, show it
+await tx.waitForIndex('alice.kas', done.txid) // the tracker is seconds behind the chain</pre>
+      </figure>
+    </section>
+
+    <section id="plan">
+      <h2>Plan, show, submit</h2>
+      <p>
+        Every spend of a name you hold is two steps. <code>plan…</code> reads the name's current state from the tracker,
+        has the module confirm it on the node, checks the product rules and answers what the wallet will be asked, with
+        nothing signed. <code>submit</code> hands that to the module. The one-step calls (<code>transfer</code>,
+        <code>list</code>, …) are the two in a row.
+      </p>
+      <figure>
+        <pre>
+const plan = await tx.planTransfer('alice.kas', 'kaspatest:qr…')
+// plan.op           'transfer'
+// plan.summary      'send alice.kas to kaspatest:qr…'
+// plan.recipient    { address, ownerType: 'schnorr', warn: false }   warn is true for a multisig or a contract
+// plan.domain       the verified state: owner, profile digest, primary flag, outpoint
+// plan.spendsSompi  0n                                                   a buy's price, a subdomain's deposits and fee
+
+// show plan.summary and plan.recipient, then:
+const result = await tx.submit(plan)
+// the user signs here
+// result.txid  '…'</pre>
+      </figure>
+      <p>
+        A plan built on a state the chain has since moved past is refused by the module, so build one close to the
+        prompt. Every refusal before the prompt is a <code>KnsTxError</code> with a <code>code</code>.
+      </p>
+    </section>
+
+    <section id="profile">
+      <h2>Change the profile</h2>
+      <p>
+        A name points at its profile by the sha256 of the document's bytes, as a <code>bafkrei…</code> CID. The document
+        itself is pinned with the tracker (<code>POST /v1/pin</code>) or anywhere that serves the same bytes; the chain
+        holds the digest alone.
+      </p>
+      <figure>
+        <pre>
+await tx.updateProfile('alice.kas', 'bafkreiexfuc43r7lv6ndt5sfdwnobgigkazm3hdgxj53yzaic4xepen4g4')
+// the user signs here; the wallet pays the network fee
+
+await tx.updateProfile('alice.kas', null) // clear it</pre>
+      </figure>
+    </section>
+
+    <section id="primary">
+      <h2>The primary name</h2>
+      <p>
+        An address shows the name its holder flagged. The flag is on chain, in the name's state, so setting it is a
+        transaction. With several flagged names, readers show the one whose output moved last; the plan says how many
+        others stay flagged.
+      </p>
+      <figure>
+        <pre>
+await tx.setPrimary('alice.kas') // the user signs here
+await kns.primaryNameFor('kaspatest:qr…') // { name: 'alice.kas', proven: null }
+
+await tx.clearPrimary('alice.kas') // the user signs here</pre>
+      </figure>
+    </section>
+
+    <section id="market">
+      <h2>List, cancel, buy</h2>
+      <p>
+        A listing moves the name into a listing contract at a fixed price, at least 0.2 KAS; while listed it cannot be
+        transferred, given subdomains or a new profile. A buyer pays the seller in the same transaction and gets the
+        name with an empty profile, unless the buyer sets one.
+      </p>
+      <figure>
+        <pre>
+await tx.list('alice.kas', 25_000_000n) // 0.25 KAS; the user signs here
+await tx.cancel('alice.kas') // the user signs here
+
+// From another account:
+const listing = await kns.lookup('alice.kas') // { kind: 'listed', priceSompi: 25_000_000n, … }
+await buyer.buy('alice.kas', { expectedPriceSompi: listing.priceSompi })
+// the user signs here. Refused before the prompt when the price changed since the listing was shown.</pre>
+      </figure>
+      <p>
+        A marketplace can write its fee into a listing: an address and a rate of 1 to 1000 basis points of the price,
+        which the seller agrees to by signing the listing. Every purchase, through any front end, then pays the fee to
+        that address and the rest to the seller, or the contract refuses it. A fee under 0.2 KAS is left out, and the
+        plan says so. Testnet-10 lineage 4d10952e…, the one the packages carry, runs it.
+      </p>
+      <figure>
+        <pre>
+const plan = await tx.planList('alice.kas', 2_500_000_000n, { partnerFee: { address: 'kaspatest:qr…', bps: 250 } })
+// plan.summary  'list alice.kas for sale at 25 KAS, of which 0.625 KAS (2.5%) is a partner fee to kaspatest:qr…: …'
+// plan.sale     { priceSompi, partnerFee: { address, bps: 250, sompi: 62_500_000n }, sellerSompi: 2_437_500_000n, … }
+// plan.partnerFeeWaived   set when the fee came to less than 0.2 KAS: the listing then carries none
+await tx.submit(plan) // the seller signs here, and agrees to the fee
+
+const ours = await kns.listings({ partner: 'kaspatest:qr…', sort: 'price_asc' }) // one marketplace's listings
+const buy = await buyer.planBuy('alice.kas', { expectedPriceSompi: 2_500_000_000n })
+// buy.summary  'buy alice.kas for 25 KAS from …: 24.375 KAS to the seller and 0.625 KAS (2.5%) partner fee to kaspatest:qr…'
+// buy.spendsSompi  2_500_000_000n: the fee is paid out of the price</pre>
+      </figure>
+    </section>
+
+    <section id="transfer">
+      <h2>Hand a name over</h2>
+      <figure>
+        <pre>
+await tx.transfer('alice.kas', 'kaspatest:qr…') // the user signs here; the profile goes with the name
+await tx.transfer('alice.kas', 'kaspatest:qr…', { profile: 'clear' }) // without it
+await tx.transfer('alice.kas', 'kaspatest:pz…') // a multisig: describeRecipient(to).warn is true, ask first</pre>
+      </figure>
+      <p>
+        A recipient is an address. Bare hex is refused, because a key and a multisig's script hash look the same and a
+        name sent to a key nobody holds is gone. The primary flag stays only for a transfer to yourself.
+      </p>
+    </section>
+
+    <section id="subdomain">
+      <h2>Mint a subdomain</h2>
+      <p>
+        A subdomain is a name of its own, minted by the holder of its parent and given to anyone. The parent's holder
+        locks its deposits, 1.8 KAS, and pays the 1 KAS subdomain fee to the registry's fee address; once minted it
+        cannot be taken back.
+      </p>
+      <figure>
+        <pre>
+const plan = await tx.planMintSubdomain('alice.kas', 'blog', 'kaspatest:qq…')
+// plan.name         'blog.alice.kas'
+// plan.spendsSompi  280_000_000n
+// plan.summary      'mint blog.alice.kas for kaspatest:qq…, locking 1.8 KAS of deposits and paying the 1 KAS subdomain fee'
+await tx.submit(plan) // the user signs here</pre>
+      </figure>
+    </section>
+
+    <section id="multisig">
+      <h2>A multisig holder</h2>
+      <p>
+        A name an m-of-n Schnorr multisig holds is spent in three steps: the module builds one fixed transaction and
+        answers a signing file (the CLI's <code>--multisig</code> file), each co-signer adds a signature over the hashes
+        in it, and <code>finishMultisig</code> puts m signatures into every coin's witness, checks every input in the
+        script engine, and sends it. The multisig spends one of its own coins beside the name, so it must hold one.
+      </p>
+      <figure>
+        <pre>
+import { multisigRedeemScript } from '@knsdomains/sdk-tx'
+
+const redeem = multisigRedeemScript([xonlyA, xonlyB, xonlyC], 2) // OP_2 &lt;A&gt; &lt;B&gt; &lt;C&gt; OP_3 OP_CHECKMULTISIG
+const ms = tx.multisig(redeem) // ms.address is the multisig's
+const build = await ms.transfer('alice.kas', 'kaspatest:qr…') // nothing signed, nothing sent
+// build.file          the signing file for the co-signers
+// build.signRequests  [{ inputIndex, sighash, redeemScript }]
+
+const one = await tx.signMultisig(build.file, keyA) // under Node; one.ready is false
+const two = await tx.signMultisig(one.file, keyC) // two.ready is true
+await tx.finishMultisig(two.file) // checked in the script engine, then sent</pre>
+      </figure>
+    </section>
+
+    <section id="follow">
+      <h2>Follow the chain</h2>
+      <p>
+        A follower answers the DAA score now, waits for a target, and says where a transaction was accepted. Three
+        sources: a JSON wRPC connection of the package's own, a rusty-kaspa wasm <code>RpcClient</code>, or a Kaspa REST
+        API, which is the one that answers by txid after the fact.
+      </p>
+      <figure>
+        <pre>
+import { followerOf, fromKaspaRest } from '@knsdomains/sdk-tx'
+
+const rest = followerOf(fromKaspaRest('https://api-tn10.kaspa.org'))
+const at = await rest.waitForAcceptance(done.txid, { timeoutMs: 120_000 })
+// { acceptingBlockHash, blueScore, timestamp }, or null: not seen is not the same as not accepted
+
+const follower = followerOf(await followWrpc(rpc)) // or tx.follower, the one KnsTx was given
+await follower.waitForDaa((await follower.daaNow()) + 10n, { onLeft: (left) => show(left) })</pre>
+      </figure>
+    </section>
+
+    <section id="refusals">
+      <h2>When something refuses</h2>
+      <p>
+        Every refusal before the prompt costs nothing. A <code>KnsTxError</code> carries a <code>code</code> and the
+        operation in <code>op</code>.
+      </p>
+      <figure>
+        <pre>
+import { KnsTxError } from '@knsdomains/sdk-tx'
+
+try {
+  await tx.registerName('alice.kas')
+} catch (e) {
+  if (e instanceof KnsTxError) {
+    switch (e.code) {
+      case 'wallet-declined':      return show('the wallet declined')
+      case 'insufficient-funds':   return topUp()
+      case 'registration-closed':  return show(e.message) // opens at a DAA score the message names
+      case 'lost-race':            return show('somebody took it first')
+      case 'hint-refuted':         return retry()         // the tracker ran behind the chain
+    }
+  }
+  throw e
+}</pre>
+      </figure>
+      <table>
+        <tr>
+          <th>Code</th>
+          <th>When</th>
+        </tr>
+        <tr>
+          <td><code>lost-race</code></td>
+          <td>somebody spent the gap first</td>
+        </tr>
+        <tr>
+          <td><code>wallet-declined</code></td>
+          <td>the wallet declined, or signed nothing for a requested input</td>
+        </tr>
+        <tr>
+          <td><code>signature-invalid</code></td>
+          <td>the wallet returned a signature the module refuses</td>
+        </tr>
+        <tr>
+          <td><code>insufficient-funds</code></td>
+          <td>the wallet holds too little</td>
+        </tr>
+        <tr>
+          <td><code>deployment</code></td>
+          <td>the module's values are another registry's</td>
+        </tr>
+        <tr>
+          <td><code>not-registered</code>, <code>hint-refuted</code></td>
+          <td>the name is not held, or the tracker's record did not check out on the chain</td>
+        </tr>
+        <tr>
+          <td><code>entrypoint-disabled</code></td>
+          <td>the deployment's emergency deny list switched this entrypoint off</td>
+        </tr>
+        <tr>
+          <td><code>node-unreachable</code>, <code>registration-closed</code></td>
+          <td>the node did not answer; open registration has not started on this deployment</td>
+        </tr>
+      </table>
+    </section>
+
+    <footer>
+      <p>
+        <code>@knsdomains/sdk-tx</code> builds, signs through a wallet and sends; <code>@knsdomains/sdk</code> reads.
+        Their READMEs are the reference for every call.
+      </p>
+    </footer>
+
+    <script>
+      for (const figure of document.querySelectorAll('figure')) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.textContent = 'Copy'
+        button.addEventListener('click', async () => {
+          const code = figure.querySelector('pre')
+          try {
+            await navigator.clipboard.writeText(code.textContent)
+            button.textContent = 'Copied'
+          } catch {
+            getSelection().selectAllChildren(code)
+            button.textContent = 'Selected'
+          }
+          setTimeout(() => (button.textContent = 'Copy'), 1200)
+        })
+        figure.append(button)
+      }
+    </script>
+  </body>
+</html>
