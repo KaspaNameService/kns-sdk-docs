@@ -57,7 +57,7 @@ into the listings it makes, list, cancel and buy. The partner fee is live on thi
 | What        | Where                                                                                                                                                                   |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Tracker     | <https://gap-tn10.knsdomains.org>, built into the packages: the index they read. Its `/health` has `manifest_digest`                                                                        |
-| Site        | <https://covenant-tn10.knsdomains.org>, KNS's own app on the same lineage: register, list and buy by hand, and see what your integration did                                                        |
+| Site        | <https://tn10.knsdomains.org>, KNS's own app on the same lineage: register, list and buy by hand, and see what your integration did                                                        |
 | Kaspa node  | for writes and for proving reads, with `--utxoindex`: a public testnet-10 node from the resolvers in `examples/wallet/public-node.mjs` (guide, section 8), or your own |
 | Testnet KAS | the faucet at <https://faucet-tn10.kaspanet.io>, which asks for a human check in a browser. A five-character name needs 37 KAS; ask KNS when the faucet gives less      |
 

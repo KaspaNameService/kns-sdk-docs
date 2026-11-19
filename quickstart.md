@@ -268,4 +268,4 @@ try {
 
 ## 13. Testnet and support
 
-Testnet-10: tracker <https://gap-tn10.knsdomains.org>, site <https://covenant-tn10.knsdomains.org>. Support: `<CONTACT_EMAIL>`
+Testnet-10: tracker <https://gap-tn10.knsdomains.org>, site <https://tn10.knsdomains.org>. Support: `<CONTACT_EMAIL>`
